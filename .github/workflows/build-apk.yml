@@ -12,6 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -28,12 +29,17 @@ jobs:
           set -euo pipefail
           SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           SDKMANAGER="$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit)"
+
           if [ -z "$SDKMANAGER" ]; then
             echo "Could not find Android sdkmanager."
             exit 1
           fi
+
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0'
+          "$SDKMANAGER" --install \
+            'platform-tools' \
+            'platforms;android-34' \
+            'build-tools;34.0.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -41,23 +47,43 @@ jobs:
           gradle-version: '8.7'
 
       - name: Extract project ZIP
-        run: unzip -q PixelFishBot-cloud-build.zip -d extracted
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ZIP="PixelFishBot_v2.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP was not found in the repository root."
+            echo "Files in repository root:"
+            ls -la
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q "$ZIP" -d extracted
 
       - name: Find Android project
         id: project
         shell: bash
         run: |
           set -euo pipefail
+
           FILE="$(find extracted -name settings.gradle.kts -type f -print -quit)"
+
           if [ -z "$FILE" ]; then
             FILE="$(find extracted -name settings.gradle -type f -print -quit)"
           fi
+
           if [ -z "$FILE" ]; then
-            echo "Could not find Gradle settings file in ZIP."
-            find extracted -maxdepth 3 -type f | head -100
+            echo "ERROR: Could not find a Gradle settings file in the ZIP."
+            find extracted -maxdepth 4 -type f | head -100
             exit 1
           fi
-          echo "dir=$(dirname "$FILE")" >> "$GITHUB_OUTPUT"
+
+          PROJECT_DIR="$(dirname "$FILE")"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Android project found in: $PROJECT_DIR"
 
       - name: Build debug APK
         env:
@@ -65,7 +91,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$GITHUB_WORKSPACE/$PROJECT_DIR"
+
           if [ -f ./gradlew ]; then
             chmod +x ./gradlew
             ./gradlew assembleDebug --stacktrace
@@ -79,4 +107,4 @@ jobs:
           name: PixelFishBot-debug-APK
           path: extracted/**/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          
+          retention-days: 14
